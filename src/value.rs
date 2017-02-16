@@ -7,41 +7,85 @@ use iso8601::DateTime;
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::borrow::{Cow, ToOwned};
 
 /// The possible XML-RPC values.
-#[derive(Debug, PartialEq)]
-pub enum Value {
+///
+/// This enum allows both borrowed data (of lifetime `'a`) and owned data
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value<'a> {
     /// `<i4>` or `<int>`, 32-bit signed integer.
     Int(i32),
+
     /// `<i8>`, 64-bit signed integer.
     ///
-    /// This is a non-standard feature that may not be supported on all servers
-    /// or clients.
+    /// This is a non-standard feature that may not be supported on all servers or clients.
     Int64(i64),
+
     /// `<boolean>`, 0 == `false`, 1 == `true`.
     Bool(bool),
-    /// `<string>`
-    // FIXME zero-copy? `Cow<'static, ..>`?
-    String(String),
+
+    /// `<string>`, a string of bytes.
+    ///
+    /// According the the [specification][spec], "A string can be used to encode binary data", so
+    /// there is no guarantee that the contents are valid UTF-8, which is required for Rust strings.
+    ///
+    /// For the common case where the value is indeed valid UTF-8, the `Value::as_str` accessor can
+    /// be used. Since success of that method depends on the remote machine, proper error handling
+    /// is necessary.
+    ///
+    /// [spec]: https://web.archive.org/web/20050913062502/http://www.xmlrpc.com/spec
+    String(Cow<'a, [u8]>),
+
     /// `<double>`
     Double(f64),
+
     /// `<dateTime.iso8601>`, an ISO 8601 formatted date/time value.
     DateTime(DateTime),
+
     /// `<base64>`, base64-encoded binary data.
-    Base64(Vec<u8>),
+    Base64(Cow<'a, [u8]>),
 
     /// `<struct>`, a mapping of named values.
-    Struct(BTreeMap<String, Value>),
-    /// `<array>`, a list of arbitrary (heterogeneous) values.
-    Array(Vec<Value>),
-
-    /// `</nil>`
     ///
-    /// Ref: https://web.archive.org/web/20050911054235/http://ontosys.com/xml-rpc/extensions.php
-    Nil
+    /// Note that XML-RPC [doesn't require][dup] the keys inside a `<struct>` to be
+    /// unique. However, most implementations will all but one of the duplicate entries.
+    ///
+    /// To allow non-copy operation and since XML-RPC allows it, this just stores a list of
+    /// key-value pairs.
+    ///
+    /// You most likely don't need the non-copy capabilities and want to make sure that no duplicate
+    /// keys exist, so you're encouraged to use a `BTreeMap` or a `HashMap` and convert to a `Value`
+    /// by using `Into` or `From`.
+    ///
+    /// [dup]: http://xml-rpc.yahoogroups.narkive.com/Br9xMUtQ/duplicate-struct-member-names-allowed
+    Struct(Cow<'a, Slice<(Cow<'a, str>, Value<'a>)>>),
+
+    /// `<array>`, a list of arbitrary (heterogeneous) values.
+    Array(Cow<'a, Slice<Value<'a>>>),
+
+    /// `<nil/>`
+    ///
+    /// This is a non-standard feature that may not be supported on all servers or clients.
+    ///
+    /// Refer to the [specification of `<nil>`][nil] for more information.
+    ///
+    /// [nil]: https://web.archive.org/web/20050911054235/http://ontosys.com/xml-rpc/extensions.php
+    Nil,
 }
 
-impl Value {
+struct Slice<T>([T]);
+
+impl<T> ToOwned for Slice<T> {
+    type Owned = Vec<T>;
+
+    fn to_owned(self) -> Self::Owned {
+        Vec::from(&self.0)
+    }
+}
+
+impl<'a> Value<'a> {
+    /// Writes this `Value` as XML.
     pub fn format<W: Write>(&self, fmt: &mut W) -> io::Result<()> {
         try!(writeln!(fmt, "<value>"));
 
@@ -96,45 +140,39 @@ impl Value {
     }
 }
 
-impl From<i32> for Value {
+impl<'a> From<i32> for Value<'a> {
     fn from(other: i32) -> Self {
         Value::Int(other)
     }
 }
 
-impl From<bool> for Value {
+impl<'a> From<bool> for Value<'a> {
     fn from(other: bool) -> Self {
         Value::Bool(other)
     }
 }
 
-impl From<String> for Value {
+impl<'a> From<String> for Value<'a> {
     fn from(other: String) -> Self {
         Value::String(other)
     }
 }
 
-impl<'a> From<&'a str> for Value {
+impl<'a> From<&'a str> for Value<'a> {
     fn from(other: &'a str) -> Self {
-        Value::String(other.to_string())
+        Value::String(Cow::from(other.as_slice()))
     }
 }
 
-impl From<f64> for Value {
+impl<'a> From<f64> for Value<'a> {
     fn from(other: f64) -> Self {
         Value::Double(other)
     }
 }
 
-impl From<DateTime> for Value {
+impl<'a> From<DateTime> for Value<'a> {
     fn from(other: DateTime) -> Self {
         Value::DateTime(other)
-    }
-}
-
-impl From<Vec<u8>> for Value {
-    fn from(other: Vec<u8>) -> Self {
-        Value::Base64(other)
     }
 }
 

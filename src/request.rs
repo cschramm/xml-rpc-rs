@@ -11,7 +11,7 @@ use std::io::{self, Write};
 /// A request to call a procedure.
 pub struct Request<'a> {
     name: &'a str,
-    args: Vec<Value>,
+    args: Vec<Value<'a>>,
 }
 
 impl<'a> Request<'a> {
@@ -26,7 +26,7 @@ impl<'a> Request<'a> {
     }
 
     /// Appends an argument to be passed to the current list of arguments.
-    pub fn arg<T: Into<Value>>(mut self, value: T) -> Self {
+    pub fn arg<T: Into<Value<'a>>>(mut self, value: T) -> Self {
         self.args.push(value.into());
 
         Request {
