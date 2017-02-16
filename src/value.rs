@@ -176,6 +176,9 @@ impl<'a> From<DateTime> for Value<'a> {
     }
 }
 
+// No impl for `Vec<u8>` since binary data can be passed as `Value::String` and `Value::Base64`.
+// TODO: explicit conversion functions
+
 #[cfg(test)]
 mod tests {
     use super::*;
